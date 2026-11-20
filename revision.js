@@ -34,14 +34,18 @@ function nextRecallAfter(last){
 function recordAnswer(id,result,again=false,now=Date.now()){
   id=canonical(id);
   const old=record(id), good=result==='good';
-  if(good&&again&&old.status==='good')return false;
+  if(good&&again&&old.status==='good'){
+    old.last=now;
+    return false;
+  }
   const lastMiss=good?(old.lastMiss??(old.wasWeak?old.last:undefined)):now;
   const pending=old.status&&old.status!=='good';
   const early=pending&&now<(old.status==='repaired'?old.dueAt:nextRecallAfter(old.last??now));
   let status=result, stage=old.stage||0, dueAt=old.dueAt;
   if(!good){stage=0;dueAt=now}
   else if(again||early){
-    status='repaired';stage=0;dueAt=nextRecallAfter(now);
+    status='repaired';stage=0;
+    if(old.status!=='repaired')dueAt=nextRecallAfter(now);
   }else if(!stage||dueAt==null||now>=dueAt){
     stage=Math.min(stage+1,reviewDays.length-1);dueAt=now+reviewDays[stage]*DAY;
   }

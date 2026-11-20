@@ -13,10 +13,10 @@ function makeCatalog(original) {
     const k=knowledgeById[topic];
     practice.push({id:'recall-'+topic,lesson:k.lesson,kind:'flash',q:prompt,a:answer,p:k.page,source:k.source});
   }
-  for(const [topic,prompt,correct,...rest] of examItems){
-    const k=knowledgeById[topic],explanation=rest.pop(),n=exams.filter(q=>q.lesson===k.lesson).length+1;
-    const ans=n%4;rest.splice(ans,0,correct);
-    exams.push({id:k.lesson+'-exam-'+n,lesson:k.lesson,kind:'mc',q:prompt,opts:rest,ans,a:explanation,p:k.page,source:k.source});
+  for(const [topic,prompt,correct,wrong1,wrong2,wrong3,explanation,relatedTopic] of examItems){
+    const k=knowledgeById[topic],n=exams.filter(q=>q.lesson===k.lesson).length+1;
+    const ans=n%4, opts=[wrong1,wrong2,wrong3];opts.splice(ans,0,correct);
+    exams.push({id:k.lesson+'-exam-'+n,lesson:k.lesson,kind:'mc',q:prompt,opts,ans,a:explanation,p:k.page,source:k.source,relatedPage:relatedTopic&&knowledgeById[relatedTopic].page});
   }
   return {practice,exams,legacy};
 }
@@ -26,18 +26,27 @@ function reviewable(){return [...bank,...examBank.filter(q=>state.records[q.id])
 function due(q,now=Date.now()){
   const r=record(q.id);return !!r.status && (r.dueAt??0)<=now;
 }
+function nextRecallAfter(last){
+  const tomorrow=new Date(last);
+  tomorrow.setHours(24,0,0,0);
+  return Math.max(tomorrow.getTime(),last+DAY/2);
+}
 function recordAnswer(id,result,again=false,now=Date.now()){
   id=canonical(id);
-  const old=record(id), good=result==='good',wasWeak=!!old.wasWeak||!good;
+  const old=record(id), good=result==='good';
+  if(good&&again&&old.status==='good')return false;
   const lastMiss=good?(old.lastMiss??(old.wasWeak?old.last:undefined)):now;
-  const won=good&&!again&&wasWeak&&!old.star&&Number.isFinite(lastMiss)&&now-lastMiss>=DAY/2&&now-(old.last||0)>=DAY/2;
-  // Early revision can confirm recall but cannot advance the interval repeatedly on the same day.
-  let stage=old.stage||0, dueAt=old.dueAt;
+  const pending=old.status&&old.status!=='good';
+  const early=pending&&now<(old.status==='repaired'?old.dueAt:nextRecallAfter(old.last??now));
+  let status=result, stage=old.stage||0, dueAt=old.dueAt;
   if(!good){stage=0;dueAt=now}
-  else if(!stage||dueAt==null||now>=dueAt){
+  else if(again||early){
+    status='repaired';stage=0;dueAt=nextRecallAfter(now);
+  }else if(!stage||dueAt==null||now>=dueAt){
     stage=Math.min(stage+1,reviewDays.length-1);dueAt=now+reviewDays[stage]*DAY;
   }
-  state.records[id]={status:result,wasWeak,star:!!old.star||won,last:now,lastMiss,stage,dueAt};
+  const won=status==='good'&&!old.star&&Number.isFinite(lastMiss)&&now-lastMiss>=DAY/2&&now-(old.last??0)>=DAY/2;
+  state.records[id]={status,wasWeak:!!old.wasWeak||status!=='good',star:!!old.star||won,last:now,lastMiss,stage,dueAt};
   return won;
 }
 function dueScreen(){
@@ -72,16 +81,24 @@ function readProgress(raw){
   const perm=x=>Array.isArray(x)&&x.length===4&&new Set(x).size===4&&x.every(n=>int(n,0,3));
   const keyOK=k=>/^(weak|due|[4-9]-(all|mc|short|flash))$/.test(k);
   requireValue(dict(raw)&&dict(raw.sessions)&&dict(raw.records)&&dict(raw.first)&&course(raw.last));
-  requireValue(raw.version===undefined||raw.version===2);
-  const old=raw.version!==2, output=freshState();
+  requireValue(raw.version===undefined||raw.version===2||raw.version===3);
+  const old=raw.version===undefined, output=freshState();
   const priorId=id=>old&&byId['legacy-'+id]?'legacy-'+id:id;
   output.last=Number(raw.last);
   for(const [l,v] of Object.entries(raw.first)){requireValue(course(l)&&typeof v==='boolean');output.first[Number(l)]=v}
   for(const [id,r] of Object.entries(raw.records)){
-    requireValue(validId(id)&&dict(r)&&['good','partial','miss'].includes(r.status));
+    requireValue(validId(id)&&dict(r)&&['good','partial','miss','repaired'].includes(r.status));
     for(const f of ['last','dueAt','lastMiss'])requireValue(r[f]===undefined||int(r[f],0,8640000000000000));
     requireValue(r.stage===undefined||int(r.stage,0,5));
-    const good=r.status==='good',last=r.last??0;
+    const last=r.last??0;
+    // Older clients promoted an immediate correction to the first spaced interval.
+    const quickCorrection=raw.version===2&&r.status==='good'&&r.wasWeak&&r.stage===1&&Number.isFinite(r.lastMiss)&&last>r.lastMiss&&last-r.lastMiss<DAY/2;
+    if(r.status==='repaired'||quickCorrection){
+      const dueAt=quickCorrection?nextRecallAfter(last):(r.dueAt??nextRecallAfter(last));
+      output.records[canonical(id)]={status:'repaired',star:r.star===true,wasWeak:true,last,lastMiss:r.lastMiss??last,stage:0,dueAt};
+      continue;
+    }
+    const good=r.status==='good';
     output.records[canonical(id)]={status:r.status,star:r.star===true,wasWeak:!!r.wasWeak||!good,last,
       stage:r.stage??(good?1:0),dueAt:r.dueAt??(last+(good?DAY:0)),lastMiss:r.lastMiss??(r.wasWeak||!good?last:undefined)};
   }
@@ -143,7 +160,12 @@ function setupBackups(){
 }
 function setupKeys(){
   document.addEventListener('keydown',e=>{
-    if(e.isComposing||e.repeat||e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||document.querySelector('dialog[open]'))return;
+    if(e.defaultPrevented||e.isComposing||e.keyCode===229||e.repeat||e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||document.querySelector('dialog[open]'))return;
+    if(screen==='session'&&e.key==='Enter'&&e.target.id==='draft'){
+      e.preventDefault();
+      if(e.target.value.trim())app.querySelector('[data-action="reveal"]:not(:disabled)')?.click();
+      return;
+    }
     if(e.target.closest('input,textarea,select,[contenteditable="true"],a'))return;
     if(!['exam','session','point'].includes(screen))return;
     let target;

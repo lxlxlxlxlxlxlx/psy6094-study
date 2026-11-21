@@ -45,11 +45,11 @@ const branches = {
 const knowledgeById = Object.fromEntries(knowledge.map(item => [item.id,item]));
 const pdfUrl = 'assets/psy6094-review.pdf';
 const passScore = 8;
-let atlasLesson = 6, atlasBranch = 0, pointFilter = 'all', pointId = null;
+let atlasLesson = 4, atlasBranch = 0, pointFilter = 'all', pointId = null;
 let pointFrom = 'atlas', pointStep = 'read', mini = null;
 
 function freshState() {
-  return {first:{},records:{},sessions:{},last:6,lastKey:null,points:{},exams:{},examHistory:{}};
+  return {version:2,first:{},records:{},sessions:{},last:4,lastKey:null,points:{},exams:{},examHistory:{}};
 }
 function pdfLink(page,label) {
   return '<a class="pdf-link" href="'+pdfUrl+'#page='+page+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
@@ -103,7 +103,7 @@ function mapScreen(){
 }
 function examBanner(l){
   const h=state.examHistory[l], draft=state.exams[l];
-  const info='10 道单选，答对 '+passScore+' 道点亮章节。'+(h?' 历史最高 '+h.best+' / 10。':'');
+  const info='10 道独立考题，答对 '+passScore+' 道点亮章节。'+(h?' 历史最高 '+h.best+' / 10。':'');
   return '<div class="exam-banner"><div><strong>'+(lessonLit(l)?'★ 章节已点亮':'☆ 章节考试')+'</strong><p>'+info+'</p></div>'+btn(draft?'继续考试':h?'再次挑战':'参加考试','examStart','primary','data-l="'+l+'"')+'</div>';
 }
 function openPoint(id){
@@ -125,7 +125,7 @@ function pointScreen(){
   const p=knowledgeById[pointId],status=pointStatus(p.id);
   let body='';
   if(pointStep==='read'){
-    body='<div class="kindlbl">知识点 '+p.id+' · '+statusLabels[status]+'</div><h1>'+esc(p.title)+'</h1><div class="studybody">'+esc(p.plain)+'</div><h2 class="subttl">答题要点</h2><p>'+esc(p.answer)+'</p><p class="hint spaced">关键词　'+esc(p.words)+'</p><p class="source">'+pdfLink(p.page,'打开复习册第 '+p.page+' 页')+' · '+esc(p.source)+'</p><div class="actions">'+btn(status==='lit'?'再测一次':'合上资料，自测','miniStart')+'</div>';
+    body='<div class="kindlbl">知识点 '+p.id+' · '+statusLabels[status]+'</div><h1>'+esc(p.title)+'</h1><div class="studybody">'+esc(p.plain)+'</div><h2 class="subttl">答题要点</h2><p>'+esc(p.answer)+'</p><p class="hint spaced">关键词　'+esc(p.words)+'</p><p class="source">'+'复习册第 '+p.page+' 页 · '+pdfLink(p.page,'看原页')+' · '+esc(p.source)+'</p><div class="actions">'+btn(status==='lit'?'再测一次':'合上资料，自测','miniStart')+'</div>';
   }else{
     const passed=mini.pick===p.id;
     body='<div class="kindlbl">知识点 '+p.id+' · 自测</div><h1>'+esc(p.title)+'</h1><p>下面哪一句最能解释这个知识点？</p><div class="options">'+mini.options.map((id,i)=>{
@@ -144,7 +144,7 @@ function pointScreen(){
 function startExam(l){
   atlasLesson=l;
   if(!state.exams[l]){
-    state.exams[l]={questions:shuffled(pool(l,'mc')).map(q=>({id:q.id,order:shuffled([0,1,2,3])})),picks:{},pos:0};
+    state.exams[l]={questions:shuffled(examBank.filter(q=>q.lesson===l)).map(q=>({id:q.id,order:shuffled([0,1,2,3])})),picks:{},pos:0};
   }
   save();turn('exam');
 }
@@ -161,8 +161,7 @@ function finishExam(){
   const score=answers.filter(a=>byId[a.id].ans===a.pick).length;
   const h=state.examHistory[l]||{best:0,attempts:0};
   for(const a of answers){
-    const prev=record(a.id),correct=byId[a.id].ans===a.pick;
-    state.records[a.id]={...prev,status:correct?'good':'miss',last:Date.now(),wasWeak:prev.wasWeak||!correct,star:prev.star||(correct&&!!prev.wasWeak)};
+    recordAnswer(a.id,byId[a.id].ans===a.pick?'good':'miss');
   }
   state.examHistory[l]={best:Math.max(score,h.best),attempts:h.attempts+1,score,answers};
   delete state.exams[l];save();turn('examResult');

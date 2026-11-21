@@ -49,7 +49,7 @@ let atlasLesson = 4, atlasBranch = 0, pointFilter = 'all', pointId = null;
 let pointFrom = 'atlas', pointStep = 'read', mini = null;
 
 function freshState() {
-  return {version:2,first:{},records:{},sessions:{},last:4,lastKey:null,points:{},exams:{},examHistory:{}};
+  return {version:3,first:{},records:{},sessions:{},last:4,lastKey:null,points:{},exams:{},examHistory:{}};
 }
 function pdfLink(page,label) {
   return '<a class="pdf-link" href="'+pdfUrl+'#page='+page+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
